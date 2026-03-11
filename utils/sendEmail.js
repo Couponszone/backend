@@ -1,24 +1,35 @@
-const sgMail = require("@sendgrid/mail");
+require("dotenv").config(); // Load .env
+const nodemailer = require("nodemailer");
 
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+// Configure SMTP transporter
+const transporter = nodemailer.createTransport({
+  host: process.env.ZEPTOMAIL_SMTP_HOST,
+  port: process.env.ZEPTOMAIL_SMTP_PORT,
+  secure: process.env.ZEPTOMAIL_SMTP_PORT == 465, // SSL for 465, false for 587
+  auth: {
+    user: process.env.ZEPTOMAIL_SMTP_USER,
+    pass: process.env.ZEPTOMAIL_SMTP_PASS,
+  },
+});
 
 async function sendOTP(email, otp) {
   try {
-    await sgMail.send({
+    const info = await transporter.sendMail({
+      from: `"CouponsZone" <${process.env.EMAIL_FROM}>`,
       to: email,
-      from: process.env.EMAIL_FROM,
       subject: "CouponsZone Admin OTP",
       text: `Your OTP is ${otp}`,
       html: `
-      <h2>CouponsZone Admin Login</h2>
-      <p>Your OTP:</p>
-      <h1>${otp}</h1>
-      <p>This OTP expires in 5 minutes.</p>
-      `
+        <h2>CouponsZone Admin Login</h2>
+        <p>Your OTP:</p>
+        <h1>${otp}</h1>
+        <p>This OTP expires in 5 minutes.</p>
+      `,
     });
 
-  } catch (error) {
-    console.error("SEND OTP ERROR:", error.response?.body || error);
+    console.log("OTP sent successfully:", info.messageId);
+  } catch (err) {
+    console.error("Error sending OTP:", err);
     throw new Error("Failed to send OTP");
   }
 }
