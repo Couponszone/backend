@@ -6,107 +6,82 @@ const jwt = require("jsonwebtoken");
 const generateOTP = require("../../utils/otp");
 const sendOTP = require("../../utils/sendEmail");
 
+
 // Allowed admin emails
 const allowedAdmins = [
   "kritirai.hyd@gmail.com",
   "raipunit4@gmail.com"
 ];
 
-
 // ================= ADMIN LOGIN (SEND OTP) =================
 exports.loginAdminWithPassword = async (req, res) => {
   try {
-
-    let { email } = req.body;
+    let { email, password } = req.body;
 
     if (!email)
       return res.status(400).json({ error: "Email required" });
 
-    // normalize email
     email = email.trim().toLowerCase();
 
     // Check allowed admin
     if (!allowedAdmins.includes(email))
       return res.status(403).json({ error: "Access denied" });
 
-    // Fetch admin
+    // Fetch admin from DB
     const { data: admin, error: adminError } = await supabase
       .from("admins")
       .select("*")
       .eq("email", email)
       .maybeSingle();
 
-    if (adminError)
-      return res.status(400).json({ error: adminError.message });
-
-    if (!admin)
-      return res.status(404).json({ error: "Admin not found" });
+    if (adminError) return res.status(400).json({ error: adminError.message });
+    if (!admin) return res.status(404).json({ error: "Admin not found" });
 
     // Password validation if provided
-    if (req.body.password) {
-
-      const valid = await bcrypt.compare(
-        req.body.password,
-        admin.password_hash
-      );
-
-      if (!valid)
-        return res.status(401).json({ error: "Invalid password" });
+    if (password) {
+      const valid = await bcrypt.compare(password, admin.password_hash);
+      if (!valid) return res.status(401).json({ error: "Invalid password" });
     }
 
     // Generate OTP
     const otp = generateOTP();
-
-    const expiresAt = new Date(
-      Date.now() + 5 * 60 * 1000
-    ).toISOString();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
     // Remove previous OTPs
-    await supabase
-      .from("admin_otp")
-      .delete()
-      .eq("email", email);
+    await supabase.from("admin_otp").delete().eq("email", email);
 
-    // Insert OTP
-    const { error: insertError } = await supabase
-      .from("admin_otp")
-      .insert([
-        {
-          email,
-          otp,
-          expires_at: expiresAt
-        }
-      ]);
+    // Insert new OTP
+    const { error: insertError } = await supabase.from("admin_otp").insert([
+      { email, otp, expires_at: expiresAt }
+    ]);
 
     if (insertError) {
       console.error("OTP INSERT ERROR:", insertError);
+      return res.status(500).json({ error: "Failed to create OTP" });
+    }
+
+    // Send OTP via ZeptoMail
+    try {
+      console.log(`Sending OTP ${otp} to ${email}`);
+      await sendOTP(email, otp, admin.name);
+    } catch (err) {
+      console.error("SEND OTP ERROR:", err.response?.data || err);
       return res.status(500).json({
-        error: "Failed to create OTP"
+        error: "Failed to send OTP. Check ZeptoMail configuration."
       });
     }
 
-    // Send email
-    await sendOTP(email, otp);
-
-// After sending email
-const safeExpiry = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-
-return res.json({
-  message: "OTP sent to your email",
-  expiresAt: safeExpiry,  // Always a valid ISO string
-  expiresAtTimestamp: new Date(safeExpiry).getTime(),
-});
+    return res.json({
+      message: "OTP sent to your email",
+      expiresAt,
+      expiresAtTimestamp: new Date(expiresAt).getTime()
+    });
 
   } catch (err) {
-
     console.error("LOGIN ADMIN ERROR:", err);
-
-    return res.status(500).json({
-      error: err.message
-    });
+    return res.status(500).json({ error: err.message });
   }
 };
-
 
 
 // ================= VERIFY OTP =================
